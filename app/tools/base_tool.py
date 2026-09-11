@@ -26,19 +26,20 @@ class BaseTool:
 
         print(f"[BaseTool] Provider={self.provider}  Model={self.model}")
 
-    def call_model(self, prompt: str) -> dict | None:
+    def call_model(self, system: str, user: str) -> dict | None:
         """Returns {"text": str, "tokens": {"prompt": int, "completion": int, "total": int}} or None."""
         if self.provider == "openai":
-            return self._call_openai(prompt)
+            return self._call_openai(system, user)
         if self.provider == "gemini":
-            return self._call_gemini(prompt)
-        return self._call_ollama(prompt)
+            return self._call_gemini(system, user)
+        return self._call_ollama(system, user)
 
     # ── Ollama ──────────────────────────────────────────────────────────
-    def _call_ollama(self, prompt: str) -> dict | None:
+    def _call_ollama(self, system: str, user: str) -> dict | None:
         payload = {
             "model": self.model,
-            "prompt": prompt,
+            "system": system,
+            "prompt": user,
             "stream": False,
             "options": {
                 "num_predict": -1,          # unlimited
@@ -67,7 +68,7 @@ class BaseTool:
             return None
 
     # ── OpenAI ───────────────────────────────────────────────────────────
-    def _call_openai(self, prompt: str) -> dict | None:
+    def _call_openai(self, system: str, user: str) -> dict | None:
         if not self.openai_key:
             print("[OpenAI] OPENAI_API_KEY is not set.")
             return None
@@ -77,9 +78,11 @@ class BaseTool:
         }
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user},
+            ],
             "temperature": self.temperature,
-            # no max_tokens → model decides when to stop
         }
         try:
             r = requests.post(self.openai_url, json=payload, headers=headers, timeout=self.timeout)
@@ -103,20 +106,21 @@ class BaseTool:
             return None
 
     # ── Gemini ───────────────────────────────────────────────────────────
-    def _call_gemini(self, prompt: str) -> dict | None:
+    def _call_gemini(self, system: str, user: str) -> dict | None:
         if not self.gemini_key:
             print("[Gemini] GEMINI_API_KEY is not set.")
             return None
-        url = f"{self.gemini_base}/{self.model}:generateContent?key={self.gemini_key}"
+        url = f"{self.gemini_base}/{self.model}:generateContent"
+        headers = {"x-goog-api-key": self.gemini_key}
         payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": {
                 "temperature": self.temperature,
-                # no maxOutputTokens → model decides when to stop
             },
         }
         try:
-            r = requests.post(url, json=payload, timeout=self.timeout)
+            r = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
             r.raise_for_status()
             body  = r.json()
             usage = body.get("usageMetadata", {})
